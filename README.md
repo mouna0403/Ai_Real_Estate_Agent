@@ -29,8 +29,8 @@ The system runs as a **real-time interactive chat interface** via **Streamlit**.
 - **Performance**: **R² ≈ 0.80**  
 
 **Features used by the model:**
-- **lat**  
-- **lon**  
+- **latitude**  
+- **longitude**  
 - **area (m²)**  
 - **property_type** (house / apartment)
 
