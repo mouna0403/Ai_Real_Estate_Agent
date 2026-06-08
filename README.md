@@ -79,7 +79,7 @@ The system runs as a **real-time interactive chat interface** via **Streamlit**.
 ---
 
 **me:** Analyze green spaces in Creteil  
-**Agent:** Créteil, located in the Val-de-Marne department, has a significant amount of green spaces, including several parks and gardens. Notable examples include Parc Dupeyroux and Parc de la Brèche.
+**Agent:** The commune of Créteil, located in the Val-de-Marne department, has a significant amount of green spaces, including several parks and gardens. Parc Dupeyroux and Parc de la Brèche are two notable examples, offering relaxation and leisure areas for residents. In addition, the commune has many small green spaces scattered throughout its territory, such as squares and gardens, which help improve residents' quality of life. In total, the commune of Créteil has over 2,000 green spaces, including around twenty parks and gardens, as well as nature reserves and forests. This significant green space offering makes Créteil a pleasant place to live, with many areas to relax and enjoy nature.
 
 ---
 
