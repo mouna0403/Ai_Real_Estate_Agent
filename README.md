@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/ai_real_estate_agent.png" width="100%" />
+  <img src="image/ai_real_estate_agent.png" width="100%" />
 </p>
 
 ## Overview
