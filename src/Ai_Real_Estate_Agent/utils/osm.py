@@ -1,10 +1,8 @@
 import requests
 import pandas as pd
-
-
-import requests
 import time
 from collections import defaultdict
+import math
 
 
 # =========================
@@ -24,7 +22,6 @@ def get_osm_data(lat, lon, radius=1000, max_retries=3):
     out body;
     """
 
-    # endpoints fallback (important car Overpass est instable)
     urls = [
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
@@ -32,7 +29,8 @@ def get_osm_data(lat, lon, radius=1000, max_retries=3):
     ]
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; DVF-Agent/1.0)"
+        "User-Agent": "Mozilla/5.0 (compatible; DVF-Agent/1.0)",
+        "Accept": "application/json"
     }
 
     for url in urls:
@@ -40,26 +38,22 @@ def get_osm_data(lat, lon, radius=1000, max_retries=3):
             try:
                 response = requests.post(
                     url,
-                    data=query,
+                    data={"data": query},
                     headers=headers,
                     timeout=60
                 )
 
-                # HTTP check
                 if response.status_code != 200:
                     time.sleep(2)
                     continue
 
-                # empty response check
                 if not response.text.strip():
                     time.sleep(2)
                     continue
 
-                # JSON parse safe
                 return response.json()
 
-            except Exception as e:
-                print(f"[Retry {attempt+1}] error:", e)
+            except Exception:
                 time.sleep(2)
 
     return None
@@ -78,7 +72,6 @@ def parse_osm(data):
     for el in data["elements"]:
         tags = el.get("tags", {})
 
-        # classification simple mais efficace
         if "amenity" in tags:
             stats[tags["amenity"]] += 1
 
@@ -125,9 +118,7 @@ def compute_location_score(stats):
 
 def osm_location_tool(lat, lon, radius=1000):
     raw = get_osm_data(lat, lon, radius)
-
     stats = parse_osm(raw)
-
     score = compute_location_score(stats)
 
     return {
@@ -139,6 +130,7 @@ def osm_location_tool(lat, lon, radius=1000):
         "features": stats,
         "location_score": score
     }
+
 
 def get_department_activities(dept_code):
 
@@ -161,11 +153,9 @@ def get_department_activities(dept_code):
 
     url = "https://overpass-api.de/api/interpreter"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (DVF-Agent)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (DVF-Agent)"}
 
-    r = requests.post(url, data=query, headers=headers, timeout=120)
+    r = requests.post(url, data={"data": query}, headers=headers, timeout=120)
 
     if r.status_code != 200:
         return None
@@ -208,11 +198,9 @@ def get_commune_activities(insee_code):
 
     url = "https://overpass-api.de/api/interpreter"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (DVF-Agent)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (DVF-Agent)"}
 
-    r = requests.post(url, data=query, headers=headers, timeout=120)
+    r = requests.post(url, data={"data": query}, headers=headers, timeout=120)
 
     if r.status_code != 200:
         return pd.DataFrame()
@@ -232,10 +220,8 @@ def get_commune_activities(insee_code):
             "insee": insee_code
         })
 
-    return result
+    return results
 
-
-import math
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371000
@@ -267,11 +253,9 @@ def get_transport_stops(lat, lon, radius=1000):
 
     url = "https://overpass-api.de/api/interpreter"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (DVF-Agent)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (DVF-Agent)"}
 
-    r = requests.post(url, data=query, headers=headers, timeout=60)
+    r = requests.post(url, data={"data": query}, headers=headers, timeout=60)
 
     if r.status_code != 200:
         return {"counts": {}, "stops": []}
@@ -288,9 +272,9 @@ def get_transport_stops(lat, lon, radius=1000):
         tags = el.get("tags", {})
 
         name = tags.get("name")
-        ref = tags.get("ref")  # ligne parfois dispo (bus surtout)
-        route = tags.get("route_ref")  # parfois bus line
-        line = tags.get("line")  # rare mais utile
+        ref = tags.get("ref")
+        route = tags.get("route_ref")
+        line = tags.get("line")
 
         stop_type = None
 
@@ -313,13 +297,13 @@ def get_transport_stops(lat, lon, radius=1000):
             stops.append({
                 "name": name,
                 "type": stop_type,
-                "line": ref or route or line,   # meilleur effort
+                "line": ref or route or line,
                 "lat": el.get("lat"),
                 "lon": el.get("lon"),
                 "distance": f"{haversine(lat, lon, el.get('lat'), el.get('lon'))}m"
             })
 
-    stops = sorted(stops, key=lambda x: x["distance"])
+    stops = sorted(stops, key=lambda x: float(x["distance"].replace("m", "")))
 
     return {
         "counts": {
@@ -329,7 +313,6 @@ def get_transport_stops(lat, lon, radius=1000):
         },
         "stops": stops
     }
-
 
 
 def get_commune_transport(insee_code):
@@ -360,13 +343,11 @@ def get_commune_transport(insee_code):
         return {"counts": {}, "stops": []}
 
     elements = r.json().get("elements", [])
-    print(f"{len(elements)} éléments trouvés")
 
     def classify_stop(tags):
         highway = tags.get("highway")
         railway = tags.get("railway")
         station = tags.get("station")
-        network  = tags.get("network", "").lower()
 
         if highway == "bus_stop":
             return "bus_stop"
@@ -391,10 +372,12 @@ def get_commune_transport(insee_code):
     for el in elements:
         tags = el.get("tags", {})
         lat, lon = el.get("lat"), el.get("lon")
+
         if not lat or not lon:
             continue
 
         stop_type = classify_stop(tags)
+
         if not stop_type:
             continue
 
@@ -426,19 +409,10 @@ def get_commune_transport(insee_code):
     }
 
 
-
-
 def get_insee_code(city_or_postal):
-    """
-    Input: city name or postal code
-    Output: list of matching communes with INSEE codes
-    """
 
-    # CAS 1 : code postal
     if str(city_or_postal).isdigit():
         url = f"https://geo.api.gouv.fr/communes?codePostal={city_or_postal}&fields=nom,code,codesPostaux"
-
-    # CAS 2 : nom de ville
     else:
         url = f"https://geo.api.gouv.fr/communes?nom={city_or_postal}&fields=nom,code,codesPostaux&limit=10"
 
@@ -462,8 +436,6 @@ def get_insee_code(city_or_postal):
         })
 
     return result
-
-
 
 
 def get_green_spaces(lat, lon, radius=1000):
@@ -490,7 +462,7 @@ def get_green_spaces(lat, lon, radius=1000):
 
     headers = {"User-Agent": "DVF-Agent"}
 
-    r = requests.post(url, data=query, headers=headers, timeout=60)
+    r = requests.post(url, data={"data": query}, headers=headers, timeout=60)
 
     if r.status_code != 200:
         return {"count": 0, "greens": []}
@@ -503,7 +475,6 @@ def get_green_spaces(lat, lon, radius=1000):
 
         tags = el.get("tags", {})
 
-        # ways/relations use "center"
         lat_ = el.get("lat") or el.get("center", {}).get("lat")
         lon_ = el.get("lon") or el.get("center", {}).get("lon")
 
@@ -522,12 +493,11 @@ def get_green_spaces(lat, lon, radius=1000):
         "greens": greens
     }
 
-import requests
 
 def get_commune_centroid(insee_code):
     url = f"https://geo.api.gouv.fr/communes/{insee_code}?fields=centre,nom,code"
 
-    r = requests.get(url)
+    r = requests.get(url, headers={"Accept": "application/json"})
 
     if r.status_code != 200:
         return None
@@ -539,7 +509,7 @@ def get_commune_centroid(insee_code):
     if not coords:
         return None
 
-    lon, lat = coords  # format GeoJSON
+    lon, lat = coords
 
     return {
         "insee": insee_code,
@@ -549,11 +519,7 @@ def get_commune_centroid(insee_code):
     }
 
 
-
 def get_commune_demographics(insee_code):
-    """
-    Retourne des indicateurs démographiques de base pour une commune
-    """
 
     url = f"https://geo.api.gouv.fr/communes/{insee_code}?fields=nom,code,population,centre,contour"
 
@@ -565,111 +531,10 @@ def get_commune_demographics(insee_code):
     data = r.json()
 
     return {
-        "insee": data.get("inseecode"),
+        "insee": data.get("code"),
         "name": data.get("nom"),
         "population": data.get("population"),
     }
-
-def get_commune_greenspaces(insee_code):
-
-    headers = {"User-Agent": "Mozilla/5.0 (DVF-Agent)"}
-
-    query = f"""
-    [out:json][timeout:60];
-
-    relation["admin_level"="8"]["ref:INSEE"="{insee_code}"]->.commune;
-    .commune map_to_area -> .a;
-
-    (
-      way(area.a)["leisure"="park"];
-      way(area.a)["leisure"="garden"];
-      way(area.a)["leisure"="nature_reserve"];
-      way(area.a)["landuse"="forest"];
-      way(area.a)["landuse"="grass"];
-      way(area.a)["landuse"="meadow"];
-      way(area.a)["natural"="wood"];
-      way(area.a)["natural"="scrub"];
-      way(area.a)["natural"="heath"];
-    );
-
-    out body;
-    >;
-    out skel qt;
-    """
-
-    r = requests.post(
-        "https://overpass-api.de/api/interpreter",
-        data={"data": query}, headers=headers, timeout=90
-    )
-
-    if r.status_code != 200:
-        print(f"Erreur HTTP {r.status_code}: {r.text[:300]}")
-        return {"counts": {}, "greenspaces": []}
-
-    elements = r.json().get("elements", [])
-    print(f"{len(elements)} éléments trouvés")
-
-    # Sépare les ways et les nodes (pour reconstruire les polygones si besoin)
-    ways = [el for el in elements if el["type"] == "way"]
-    nodes = {el["id"]: (el["lat"], el["lon"]) for el in elements if el["type"] == "node"}
-
-    counts = {
-        "park": 0,
-        "garden": 0,
-        "nature_reserve": 0,
-        "forest": 0,
-        "grass": 0,
-        "meadow": 0,
-        "wood": 0,
-        "scrub": 0,
-        "heath": 0,
-    }
-
-    greenspaces = []
-
-    for way in ways:
-        tags = way.get("tags", {})
-        leisure = tags.get("leisure")
-        landuse = tags.get("landuse")
-        natural = tags.get("natural")
-
-        # Détermine le type
-        if leisure in counts:
-            gs_type = leisure
-        elif landuse in counts:
-            gs_type = landuse
-        elif natural in counts:
-            gs_type = natural
-        else:
-            continue
-
-        counts[gs_type] += 1
-
-        # Centroïde approximatif à partir des nodes du way
-        way_nodes = way.get("nodes", [])
-        coords = [nodes[n] for n in way_nodes if n in nodes]
-        if coords:
-            lat = sum(c[0] for c in coords) / len(coords)
-            lon = sum(c[1] for c in coords) / len(coords)
-        else:
-            lat, lon = None, None
-
-        greenspaces.append({
-            "name": tags.get("name"),
-            "type": gs_type,
-            "lat": lat,
-            "lon": lon,
-            "osm_id": way["id"]
-        })
-
-    print(f"{len(greenspaces)} espaces verts identifiés")
-
-    return {
-        "insee_code": insee_code,
-        "counts": counts,
-        "greenspaces": greenspaces
-    }
-
 
 
 def address_to_coords(address: str):
@@ -696,4 +561,111 @@ def address_to_coords(address: str):
     return {
         "latitude": float(data[0]["lat"]),
         "longitude": float(data[0]["lon"])
+    }
+
+
+
+def get_commune_greenspaces(insee_code):
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (DVF-Agent)",
+        "Accept": "application/json"
+    }
+
+    query = f"""
+    [out:json][timeout:60];
+
+    relation["admin_level"="8"]["ref:INSEE"="{insee_code}"]->.commune;
+    .commune map_to_area -> .a;
+
+    (
+      way(area.a)["leisure"="park"];
+      way(area.a)["leisure"="garden"];
+      way(area.a)["leisure"="nature_reserve"];
+      way(area.a)["landuse"="forest"];
+      way(area.a)["landuse"="grass"];
+      way(area.a)["landuse"="meadow"];
+      way(area.a)["natural"="wood"];
+      way(area.a)["natural"="scrub"];
+      way(area.a)["natural"="heath"];
+    );
+
+    out body;
+    >;
+    out skel qt;
+    """
+
+    r = requests.post(
+        "https://overpass-api.de/api/interpreter",
+        data={"data": query},
+        headers=headers,
+        timeout=90
+    )
+
+    if r.status_code != 200:
+        print(f"Erreur HTTP {r.status_code}: {r.text[:300]}")
+        return {"counts": {}, "greenspaces": []}
+
+    try:
+        elements = r.json().get("elements", [])
+    except Exception:
+        return {"counts": {}, "greenspaces": []}
+
+    ways = []
+    nodes = {}
+
+    for el in elements:
+        if el["type"] == "node":
+            nodes[el["id"]] = (el.get("lat"), el.get("lon"))
+        elif el["type"] == "way":
+            ways.append(el)
+
+    counts = {
+        "park": 0,
+        "garden": 0,
+        "nature_reserve": 0,
+        "forest": 0,
+        "grass": 0,
+        "meadow": 0,
+        "wood": 0,
+        "scrub": 0,
+        "heath": 0,
+    }
+
+    greenspaces = []
+
+    for way in ways:
+        tags = way.get("tags", {})
+        leisure = tags.get("leisure")
+        landuse = tags.get("landuse")
+        natural = tags.get("natural")
+
+        gs_type = leisure or landuse or natural
+
+        if gs_type not in counts:
+            continue
+
+        counts[gs_type] += 1
+
+        way_nodes = way.get("nodes", [])
+        coords = [nodes[n] for n in way_nodes if n in nodes and nodes[n][0] is not None]
+
+        if coords:
+            lat = sum(c[0] for c in coords) / len(coords)
+            lon = sum(c[1] for c in coords) / len(coords)
+        else:
+            lat, lon = None, None
+
+        greenspaces.append({
+            "name": tags.get("name"),
+            "type": gs_type,
+            "lat": lat,
+            "lon": lon,
+            "osm_id": way["id"]
+        })
+
+    return {
+        "insee_code": insee_code,
+        "counts": counts,
+        "greenspaces": greenspaces
     }
