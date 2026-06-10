@@ -1,4 +1,5 @@
 import os
+import time 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.tools import tool
@@ -58,7 +59,7 @@ def tool_osm_location(lat: float, lon: float, radius: int = 1000) -> dict:
     """
     Analyze points of interest around GPS coordinates via OpenStreetMap.
     Input: latitude (ex: 48.8566), longitude (ex: 2.3522), radius in meters (default 1000)
-    Output: dict with {input: {lat, lon, radius}, features: [list of POIs with name, type, distance, lat, lon], location_score: float (0-100)}
+    Output: dict with {input: {lat, lon, radius}, features: [list of POIs with name, type, distance, lat, lon]}
     Features include: restaurants, shops, schools, hospitals, parks, cultural sites, sports facilities, etc.
     """
     try:
@@ -225,6 +226,12 @@ RESTRICTION: Only respond to requests about Île-de-France (departments 75,77,78
 
 CRITICAL RULE: Respond ONLY to the user's exact request. Do not add extra information, do not provide additional analysis, do not suggest related topics. Answer precisely what is asked and nothing more. "You must explicitly tell it to use the INSEE code returned by `tool_get_insee_code`, not to make one up."
 
+CRITICAL: If all tools return empty or error, you MUST respond ONLY with:
+"Data unavailable for this commune."
+NEVER invent, guess, or use training knowledge to fill gaps. Empty tool = empty answer.
+...
+
+
 PRICE ESTIMATION:
 - Address → tool_address_to_coords + tool_predict_price
 - Commune → tool_get_insee_code + tool_get_commune_centroid + tool_predict_price
@@ -256,16 +263,20 @@ def ask(question: str):
     print(f"\n[USER] {question}")
     print("[AGENT] Processing...")
     
+    start = time.time()
     result = agent_executor.invoke({"messages": [HumanMessage(content=question)]})
-    
+    elapsed = time.time() - start
+    response = result["messages"][-1].content
+    print(f"[AGENT] {response}")
+    print(f"[TIME] {elapsed:.2f}s")
+
     for msg in result["messages"]:
         if hasattr(msg, 'tool_calls') and msg.tool_calls:
             print(f"[TOOL] {msg.tool_calls}")
         elif hasattr(msg, 'name') and msg.name:
             print(f"[TOOL_RESULT] {msg.name}: {str(msg.content)[:200]}...")
+
     
-    response = result["messages"][-1].content
-    print(f"[AGENT] {response}")
     return response
 
 if __name__ == "__main__":
