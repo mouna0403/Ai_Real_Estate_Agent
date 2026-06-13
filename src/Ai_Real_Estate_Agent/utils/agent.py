@@ -309,21 +309,33 @@ agent_executor = create_react_agent(
 )
 
 def ask(question: str):
-
-    
-    
     logger.info(f"[ASK] Question received: {question}")
     start = time.time()
-    
+
     try:
-        result = agent_executor.invoke({"messages": [HumanMessage(content=question)]})
+        result = agent_executor.invoke(
+            {"messages": [HumanMessage(content=question)]}
+        )
+
         elapsed = time.time() - start
         response = result["messages"][-1].content
+
+        # LOG TOOL CALLS + TOOL RESULTS
+        for msg in result["messages"]:
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                logger.info(f"[TOOL CALL] {msg.tool_calls}")
+
+            if hasattr(msg, "name") and msg.name:
+                logger.info(f"[TOOL RESULT] {msg.name}: {str(msg.content)[:200]}")
+
         logger.info(f"[ASK] Response in {elapsed:.2f}s: {response[:100]}")
         return response
+
     except Exception as e:
         logger.error(f"[ASK] Error: {str(e)}")
         return f"Processing error: {str(e)}"
+    
+    
 
 if __name__ == "__main__":
     print("Agent ready. IDF only (75,77,78,91,92,93,94,95)")
