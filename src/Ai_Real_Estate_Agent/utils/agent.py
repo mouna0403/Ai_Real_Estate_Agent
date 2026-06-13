@@ -1,5 +1,6 @@
 import os
 import time 
+import logging
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain.tools import tool
@@ -7,6 +8,12 @@ from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 from Ai_Real_Estate_Agent.utils.predictor import predict_price
 from Ai_Real_Estate_Agent.utils.osm import *
+
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 load_dotenv()
 os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
@@ -198,11 +205,15 @@ def tool_predict_price(lat: float, lon: float, area: float, property_type: str) 
     except Exception as e:
         return {"error": f"Price prediction failed: {str(e)}"}
 
-model = ChatGroq(
-    model="llama-3.3-70b-versatile", #"llama-3.1-8b-instant",
+
+
+llm = ChatGroq(
+    model= "llama-3.3-70b-versatile", #"llama-3.1-8b-instant"
     temperature=0.3,
     max_tokens=512
 )
+
+
 
 tools = [
     tool_get_insee_code,
@@ -224,19 +235,56 @@ You are a territorial analysis assistant for Île-de-France only. Never use inte
 
 RESTRICTION: Only respond to requests about Île-de-France (departments 75,77,78,91,92,93,94,95). If user asks outside IDF, say you cannot respond.
 
-CRITICAL RULE: Respond ONLY to the user's exact request. Do not add extra information, do not provide additional analysis, do not suggest related topics. Answer precisely what is asked and nothing more. "You must explicitly tell it to use the INSEE code returned by `tool_get_insee_code`, not to make one up."
+CRITICAL RULE: Respond ONLY to the user's exact request. Do not add extra information, do not provide additional analysis, do not suggest related topics. Answer precisely what is asked and nothing more.
 
-CRITICAL: If all tools return empty or error, you MUST respond ONLY with:
-"Data unavailable for this commune."
-NEVER invent, guess, or use training knowledge to fill gaps. Empty tool = empty answer.
-...
+TOOL ROUTING — STRICT RULES:
 
+INPUT TYPE → TOOL CHAIN:
+
+1. COMMUNE NAME (ex: "Nanterre", "Paris 15e"):
+   → ALWAYS start with tool_get_insee_code(city) to get the insee_code
+   → Then use ONLY the *_commune_* tools with that insee_code:
+      • transport     → tool_get_commune_transport(insee_code)
+      • activities    → tool_get_commune_activities(insee_code)
+      • green spaces  → tool_get_commune_greenspaces(insee_code)
+      • demographics  → tool_get_commune_demographics(insee_code)
+      • centroid      → tool_get_commune_centroid(insee_code)
+  Always use the exact insee_code returned by tool_get_insee_code.
+  Never guess, infer, or use a insee_code from your own knowledge
+   FORBIDDEN: Never call tool_get_transport_stops, tool_osm_location, or
+   tool_get_green_spaces with GPS coordinates when the input is a commune name.
+
+2. POSTAL ADDRESS (ex: "10 rue de Rivoli, 75004 Paris"):
+   → tool_address_to_coords(address) → get lat, lon
+   → Then use ONLY coordinate-based tools with those lat/lon values:
+      • transport     → tool_get_transport_stops(lat, lon, radius)
+      • activities    → tool_osm_location(lat, lon, radius)
+      • green spaces  → tool_get_green_spaces(lat, lon, radius)
+    Default radius is 500m unless the user specifies otherwise.
+
+3. GPS COORDINATES provided directly by the user:
+   → Same chain as (2), use them directly.
+
+ABSOLUTE RULE: Never generate, infer, or guess GPS coordinates for a commune.
+If the user gives a city/commune name → always go through tool_get_insee_code first,
+then use _commune_ tools exclusively.
+Coordinates are only used when returned by tool_address_to_coords or explicitly
+provided by the user.
 
 PRICE ESTIMATION:
 - Address → tool_address_to_coords + tool_predict_price
 - Commune → tool_get_insee_code + tool_get_commune_centroid + tool_predict_price
 - Department → ask user to specify a commune
-- Require area (m²) and property_type ("house"/"apartment") - ask if missing
+- Require area (m²) and property_type ("house" or "apartment") — ask if missing
+- MANDATORY: use the lat/lon returned by tool_get_commune_centroid or
+  tool_address_to_coords as inputs to tool_predict_price.
+  NEVER use coordinates from your own knowledge.
+
+DATA INTEGRITY:
+- If a tool returns null, empty, or error → state "data unavailable" for THAT section
+- NEVER invent, guess, or use training knowledge to fill gaps
+- NEVER use training knowledge to compensate for a failed tool
+- Use only coordinates returned by tools
 
 RESPONSE STYLE:
 - Respond in same language as user (French or English)
@@ -247,37 +295,35 @@ RESPONSE STYLE:
 - Show only significant numbers (>20 items or major differences)
 - Ignore irrelevant items (benches, trash cans, fountains)
 
-PRICE REQUESTS ONLY: Respond with estimated price, price per m², and one short context sentence. No general commune description.
+PRICE REQUESTS ONLY: Respond with estimated price, price per m², and one short
+context sentence. No general commune description.
 
 If tool returns "error", state data unavailable and ask to retry.
 """
 
 agent_executor = create_react_agent(
-    model=model,
+    model=llm,
     tools=tools,
     prompt=SYSTEM_PROMPT,
     checkpointer=None
 )
 
 def ask(question: str):
-    print(f"\n[USER] {question}")
-    print("[AGENT] Processing...")
+
     
+    
+    logger.info(f"[ASK] Question received: {question}")
     start = time.time()
-    result = agent_executor.invoke({"messages": [HumanMessage(content=question)]})
-    elapsed = time.time() - start
-    response = result["messages"][-1].content
-    print(f"[AGENT] {response}")
-    print(f"[TIME] {elapsed:.2f}s")
-
-    for msg in result["messages"]:
-        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-            print(f"[TOOL] {msg.tool_calls}")
-        elif hasattr(msg, 'name') and msg.name:
-            print(f"[TOOL_RESULT] {msg.name}: {str(msg.content)[:200]}...")
-
     
-    return response
+    try:
+        result = agent_executor.invoke({"messages": [HumanMessage(content=question)]})
+        elapsed = time.time() - start
+        response = result["messages"][-1].content
+        logger.info(f"[ASK] Response in {elapsed:.2f}s: {response[:100]}")
+        return response
+    except Exception as e:
+        logger.error(f"[ASK] Error: {str(e)}")
+        return f"Processing error: {str(e)}"
 
 if __name__ == "__main__":
     print("Agent ready. IDF only (75,77,78,91,92,93,94,95)")
