@@ -148,11 +148,12 @@ gcloud config set project YOUR_PROJECT_ID
 
 ---
 
+
 ### Step 1 — Enable required APIs
 
 ```bash
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com chat.googleapis.com
-```
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com chat.googleapis.com
+````
 
 ---
 
@@ -194,7 +195,38 @@ docker push \
 
 ---
 
-### Step 6 — Deploy to Cloud Run
+### Step 6 — Create Secret Manager secret (europe-west1)
+
+```bash
+gcloud secrets create GROQ_API_KEY \
+  --replication-policy=user-managed \
+  --locations=europe-west1
+```
+
+```bash
+echo -n "YOUR_GROQ_API_KEY" | \
+gcloud secrets versions add GROQ_API_KEY \
+  --data-file=-
+```
+
+---
+
+### Step 7 — Grant Secret Manager access to Cloud Run
+
+```bash
+gcloud projects describe YOUR_PROJECT_ID \
+  --format="value(projectNumber)"
+```
+
+```bash
+gcloud secrets add-iam-policy-binding GROQ_API_KEY \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+---
+
+### Step 8 — Deploy to Cloud Run (using Secret Manager)
 
 ```bash
 gcloud run deploy ai-real-estate-agent-app \
@@ -202,14 +234,12 @@ gcloud run deploy ai-real-estate-agent-app \
   --region europe-west1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars GROQ_API_KEY=your_api_key
+  --set-secrets=GROQ_API_KEY=GROQ_API_KEY:latest
 ```
-
-Copy the service URL from the output — you will need it in the next step.
 
 ---
 
-### Step 7 — Make the service publicly invocable
+### Step 9 — Make the service publicly invocable
 
 ```bash
 gcloud run services add-iam-policy-binding ai-real-estate-agent-app \
@@ -220,33 +250,48 @@ gcloud run services add-iam-policy-binding ai-real-estate-agent-app \
 
 ---
 
-### Step 8 — Configure the Google Chat API
+### Step 10 — Configure the Google Chat API
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services** → **Google Chat API** → **Configuration**
-2. Fill in the app details:
-   - **App name:** AI Real Estate Agent
-   - **Avatar URL:** any public HTTPS image URL (PNG, square, min 256x256)
-   - **Description:** AI assistant for real estate analysis
-3. Under **Interactive features**, enable:
-   - **Users can DM the app**
-   - **App can join spaces and group conversations**
-4. Under **Connection settings**, select **HTTP endpoint URL** and paste your Cloud Run URL
-5. Under **Triggers**, select **Use a common HTTP endpoint URL for all triggers** and paste: `https://YOUR-CLOUDRUN-URL/chat`
-6. Under **Visibility**, add your Gmail address to allow access
-7. Click **Save**
+1. Google Cloud Console → APIs & Services → Google Chat API → Configuration
+2. App name: AI Real Estate Agent
+3. Avatar URL: public HTTPS image (PNG, square, min 256x256)
+4. Description: AI assistant for real estate analysis
+5. Enable interactive features:
+
+   * Users can DM the app
+   * App can join spaces and group conversations
+6. Connection settings:
+
+   * HTTP endpoint URL → Cloud Run service URL
+7. Triggers:
+
+   * Use common HTTP endpoint URL for all triggers
+   * URL: [https://YOUR-CLOUDRUN-URL/chat](https://YOUR-CLOUDRUN-URL/chat)
+8. Visibility:
+
+   * Add your Gmail address
+9. Save
 
 ---
 
-### Step 9 — Find the app in Google Chat
+### Step 11 — Find the app in Google Chat
 
-1. Open [Google Chat](https://chat.google.com)
-2. Click **+** → **Start a conversation** → search **AI Real Estate Agent**
-3. Open the DM and start chatting
+```text
+Google Chat
+  -> New Chat
+  -> Search Apps
+  -> AI Real Estate Agent
+```
 
 ---
 
-## Scope
+### Scope
 
-* Strictly limited to **Île-de-France** (departments 75, 77, 78, 91, 92, 93, 94, 95)
-* Tool-based reasoning only — no external factual assumptions
+* Strictly limited to Île-de-France (75, 77, 78, 91, 92, 93, 94, 95)
+* Tool-based reasoning only
+* No API keys in environment variables
+* Secrets managed via Google Secret Manager (europe-west1)
+
+
+external factual assumptions
 * Responds in the same language as the user (French or English)
