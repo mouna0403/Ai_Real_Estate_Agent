@@ -211,6 +211,7 @@ def get_transport_stops(lat, lon, radius=1000):
     elements = data.get("elements", [])
     bus, metro, rail, tram = 0, 0, 0, 0
     stops = []
+    seen = set()
 
     for el in elements:
         tags = el.get("tags", {})
@@ -219,41 +220,65 @@ def get_transport_stops(lat, lon, radius=1000):
             continue
 
         name = tags.get("name")
+        if not name:
+            continue
+
         ref = tags.get("ref") or tags.get("route_ref") or tags.get("line")
         stop_type = None
 
         if tags.get("highway") == "bus_stop":
-            #stop_type = "bus_stop"
-            bus += 1
+            stop_type = "bus_stop"
         elif tags.get("railway") == "subway_entrance" or tags.get("station") == "subway":
-            #stop_type = "metro"
-            metro += 1
+            stop_type = "metro"
         elif tags.get("railway") == "tram_stop":
-            #stop_type = "tram"
-            tram += 1
+            stop_type = "tram"
         elif tags.get("railway") == "station":
-            #stop_type = "rail_station"
+            stop_type = "rail_station"
+        elif "public_transport" in tags:
+            stop_type = "transport"
+
+        if not stop_type:
+            continue
+
+        key = (name, stop_type)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        dist = haversine(lat, lon, el_lat, el_lon)
+
+        if stop_type == "bus_stop":
+            bus += 1
+        elif stop_type == "metro":
+            metro += 1
+        elif stop_type == "tram":
+            tram += 1
+        elif stop_type == "rail_station":
             rail += 1
-        # elif "public_transport" in tags:
-        #     #stop_type = "transport"
 
-        # if stop_type:
-        #     dist = haversine(lat, lon, el_lat, el_lon)
-        #     stops.append({
-        #         "name": name,
-        #         "type": stop_type,
-        #         "line": ref,
-        #         "lat": el_lat,
-        #         "lon": el_lon,
-        #         "distance_m": round(dist),
-        #     })
+        stops.append({
+            "name": name,
+            "type": stop_type,
+            "line": ref,
+            "lat": el_lat,
+            "lon": el_lon,
+            "distance_m": round(dist),
+        })
 
-    #stops = sorted(stops, key=lambda x: x["distance_m"])
+    stops = sorted(stops, key=lambda x: x["distance_m"])
+
+    N_PER_TYPE = {"bus_stop": 3, "metro": 2, "tram": 2, "rail_station": 1}
+
+    selected = sum(
+        ([s for s in stops if s["type"] == t][:n] for t, n in N_PER_TYPE.items()),
+        []
+    )
+
     return {
-        "counts": {"bus_stop": bus, "metro": metro, "rail_station": rail, "tram": tram}
+        "counts": {"bus_stop": bus, "metro": metro, "rail_station": rail, "tram": tram},
+        "stops": sorted(selected, key=lambda x: x["distance_m"]),
     }
 
-    
 
 
 # =========================
@@ -278,22 +303,22 @@ def get_commune_transport(insee_code):
     if not data:
         return {"insee_code": insee_code, "counts": {}, "stops": []}
 
-    def classify_stop(tags):
-        highway = tags.get("highway")
-        railway = tags.get("railway")
-        station = tags.get("station")
-        if highway == "bus_stop":
-            return "bus_stop"
-        if railway == "subway_entrance" or station == "subway":
-            return "metro"
-        if railway == "tram_stop":
-            return "tram"
-        if railway == "station":
-            return "rail_station"
-        return None
-
     bus, metro, rail, tram = 0, 0, 0, 0
     stops = []
+    seen = set()
+
+    def classify_stop(tags):
+        if tags.get("highway") == "bus_stop":
+            return "bus_stop"
+        elif tags.get("railway") == "subway_entrance" or tags.get("station") == "subway":
+            return "metro"
+        elif tags.get("railway") == "tram_stop":
+            return "tram"
+        elif tags.get("railway") == "station":
+            return "rail_station"
+        elif "public_transport" in tags:
+            return "transport"
+        return None
 
     for el in data.get("elements", []):
         tags = el.get("tags", {})
@@ -301,9 +326,18 @@ def get_commune_transport(insee_code):
         if not lat or not lon:
             continue
 
+        name = tags.get("name")
+        if not name:
+            continue
+
         stop_type = classify_stop(tags)
         if not stop_type:
             continue
+
+        key = (name, stop_type)
+        if key in seen:
+            continue
+        seen.add(key)
 
         if stop_type == "bus_stop":
             bus += 1
@@ -314,14 +348,19 @@ def get_commune_transport(insee_code):
         elif stop_type == "tram":
             tram += 1
 
-        stops.append({"name": tags.get("name"), "type": stop_type, "lat": lat, "lon": lon})
-
+        stops.append({
+            "name": name,
+            "type": stop_type,
+            "lat": lat,
+            "lon": lon
+        })
+        
+    N_PER_TYPE = {"bus_stop": 3, "metro": 2, "tram": 2, "rail_station": 2}
     return {
-        "insee_code": insee_code,
-        "counts": {"bus_stop": bus, "metro": metro, "rail_station": rail, "tram": tram},
-        #"stops": stops,
-    }
-
+    "insee_code": insee_code,
+    "counts": {"bus_stop": bus, "metro": metro, "rail_station": rail, "tram": tram},
+    "stops": (sum(([s for s in stops if s["type"] == t][:n] for t, n in N_PER_TYPE.items()), [])),
+}
 
 # =========================
 # 7. COMMUNE GREEN SPACES
@@ -409,7 +448,7 @@ def get_insee_code(city_or_postal):
         return None
 
     return [
-        {"city": item.get("nom"), "insee_code": item.get("code"), "postal_codes": item.get("codesPostaux", [])}
+        {"city": item.get("nom"), "insee_code": item.get("code")}
         for item in r.json()
     ]
 
