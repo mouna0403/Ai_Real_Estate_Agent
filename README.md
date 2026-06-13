@@ -121,7 +121,7 @@ GROQ_API_KEY=your_api_key
 ## Option 1 — Run Locally (Streamlit)
 
 ```bash
-uv run src/Ai_Real_Estate_Agent/main1.py
+uv run streamlit run .\src\Ai_Real_Estate_Agent\main1.py
 ```
 
 Open your browser and interact with the chat interface:
