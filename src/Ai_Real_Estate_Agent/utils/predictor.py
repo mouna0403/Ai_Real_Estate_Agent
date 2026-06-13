@@ -14,9 +14,7 @@ def predict_price(lat, lon, area, property_type):
     """
     Predict real estate price based on location, area and property type.
     """
-    print("Loading model...")
     model = joblib.load(MODEL_PATH)
-    print("Model loaded")
     X = pd.DataFrame([{
         "latitude": lat,
         "longitude": lon,
@@ -40,8 +38,6 @@ def predict_price(lat, lon, area, property_type):
     )
 
     pred_log = model.predict(X)
-    print("predicted")
-    print(X)
     return int(np.expm1(pred_log)[0])
 
 if __name__ == "__main__":
