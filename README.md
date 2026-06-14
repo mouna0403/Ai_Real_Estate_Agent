@@ -233,18 +233,27 @@ gcloud run deploy ai-real-estate-agent-app \
   --image europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/ai-real-estate-repo/ai-real-estate-agent-app:latest \
   --region europe-west1 \
   --platform managed \
-  --allow-unauthenticated \
   --set-secrets=GROQ_API_KEY=GROQ_API_KEY:latest
 ```
 
+
+
 ---
 
-### Step 9 — Make the service publicly invocable
+### Step 9 — Grant invoke permission to Google Workspace Add-ons
+
+First, retrieve the service account email:
+1. Google Cloud Console → APIs & Services → Google Chat API → Configuration
+2. Scroll down to the **"App credentials"** section
+3. Copy the value of **"Service account email"**
+   (format: `service-XXXXXXXXX@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`)
+
+Then run:
 
 ```bash
 gcloud run services add-iam-policy-binding ai-real-estate-agent-app \
   --region=europe-west1 \
-  --member="allUsers" \
+  --member="serviceAccount:service-XXXXXXXXX@gcp-sa-gsuiteaddons.iam.gserviceaccount.com" \
   --role="roles/run.invoker"
 ```
 
@@ -257,18 +266,14 @@ gcloud run services add-iam-policy-binding ai-real-estate-agent-app \
 3. Avatar URL: public HTTPS image (PNG, square, min 256x256)
 4. Description: AI assistant for real estate analysis
 5. Enable interactive features:
-
    * Users can DM the app
    * App can join spaces and group conversations
 6. Connection settings:
-
    * HTTP endpoint URL → Cloud Run service URL
 7. Triggers:
-
    * Use common HTTP endpoint URL for all triggers
-   * URL: [https://YOUR-CLOUDRUN-URL/chat](https://YOUR-CLOUDRUN-URL/chat)
+   * URL: `https://YOUR-CLOUDRUN-URL/chat`
 8. Visibility:
-
    * Add your Gmail address
 9. Save
 
@@ -291,7 +296,7 @@ Google Chat
 * Tool-based reasoning only
 * No API keys in environment variables
 * Secrets managed via Google Secret Manager (europe-west1)
-
+* Cloud Run endpoint secured via IAM — only invocable by `gcp-sa-gsuiteaddons`
 
 external factual assumptions
 * Responds in the same language as the user (French or English)
