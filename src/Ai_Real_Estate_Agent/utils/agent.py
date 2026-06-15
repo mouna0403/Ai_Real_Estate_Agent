@@ -62,15 +62,15 @@ def tool_get_insee_code(city: str) -> list:
         return {"error": f"Failed to get INSEE code: {str(e)}"}
 
 @tool
-def tool_osm_location(lat: float, lon: float, radius: int = 1000) -> dict:
+def tool_get_activities(lat: float, lon: float, radius: int = 1000) -> dict:
     """
     Analyze points of interest around GPS coordinates via OpenStreetMap.
-    Input: latitude (ex: 48.8566), longitude (ex: 2.3522), radius in meters (default 1000)
+    Input: latitude (ex: 48.8566), longitude (ex: 2.3522), radius in meters (default 500)
     Output: dict with {input: {lat, lon, radius}, features: [list of POIs with name, type, distance, lat, lon]}
     Features include: restaurants, shops, schools, hospitals, parks, cultural sites, sports facilities, etc.
     """
     try:
-        return truncate_output(osm_location_tool(lat, lon, radius))
+        return truncate_output(get_activities(lat, lon, radius))
     except Exception as e:
         return {"error": f"OSM location failed: {str(e)}"}
 
@@ -217,7 +217,7 @@ llm = ChatGroq(
 
 tools = [
     tool_get_insee_code,
-    tool_osm_location,
+    tool_get_activities,
     tool_get_commune_transport,
     tool_get_transport_stops,
     tool_get_department_activities,
@@ -251,19 +251,23 @@ INPUT TYPE → TOOL CHAIN:
       • centroid      → tool_get_commune_centroid(insee_code)
   Always use the exact insee_code returned by tool_get_insee_code.
   Never guess, infer, or use a insee_code from your own knowledge
-   FORBIDDEN: Never call tool_get_transport_stops, tool_osm_location, or
+   FORBIDDEN: Never call tool_get_transport_stops, tool_get_activities, or
    tool_get_green_spaces with GPS coordinates when the input is a commune name.
 
 2. POSTAL ADDRESS (ex: "10 rue de Rivoli, 75004 Paris"):
    → tool_address_to_coords(address) → get lat, lon
    → Then use ONLY coordinate-based tools with those lat/lon values:
       • transport     → tool_get_transport_stops(lat, lon, radius)
-      • activities    → tool_osm_location(lat, lon, radius)
+      • activities    → tool_get_activities(lat, lon, radius)
       • green spaces  → tool_get_green_spaces(lat, lon, radius)
     Default radius is 500m unless the user specifies otherwise.
 
 3. GPS COORDINATES provided directly by the user:
    → Same chain as (2), use them directly.
+
+COMPLETE ANALYSIS:
+- Commune name → tool_get_insee_code, then IN PARALLEL: tool_get_commune_transport + tool_get_commune_greenspaces + tool_get_commune_activities + tool_get_commune_demographics
+- Address → tool_address_to_coords, then IN PARALLEL: tool_get_transport_stops + tool_get_green_spaces + tool_get_activities (radius provided by user, default 500m if not specified)
 
 ABSOLUTE RULE: Never generate, infer, or guess GPS coordinates for a commune.
 If the user gives a city/commune name → always go through tool_get_insee_code first,
@@ -332,9 +336,47 @@ def ask(question: str):
         return response
 
     except Exception as e:
-        logger.error(f"[ASK] Error: {str(e)}")
-        return f"Processing error: {str(e)}"
-    
+        error_str = str(e)
+        logger.error(f"[ASK] Error: {error_str}")
+
+        if "rate_limit_exceeded" in error_str or "429" in error_str:
+            return "Our analysis service is temporarily unavailable due to high demand. Please try again in a few minutes."
+
+        if "tool_use_failed" in error_str or "tool call validation failed" in error_str or "400" in error_str:
+            return "We encountered a technical issue while processing your request. Please try again."
+
+        if "timeout" in error_str.lower() or "timed out" in error_str.lower() or "408" in error_str:
+            return "The request took too long to process. Please try again."
+
+        if "401" in error_str or "403" in error_str or "authentication" in error_str.lower() or "api_key" in error_str.lower() or "unauthorized" in error_str.lower():
+            return "Service authentication error. Please contact support."
+
+        if "502" in error_str or "503" in error_str or "504" in error_str or "service unavailable" in error_str.lower():
+            return "The analysis service is temporarily down. Please try again in a few minutes."
+
+        if "context_length_exceeded" in error_str or "maximum context" in error_str.lower() or "token" in error_str.lower() and "limit" in error_str.lower():
+            return "Your request is too long to process. Please simplify your question."
+
+        if "connection" in error_str.lower() or "network" in error_str.lower() or "socket" in error_str.lower() or "dns" in error_str.lower():
+            return "A network error occurred. Please check your connection and try again."
+
+        if "json" in error_str.lower() or "parse" in error_str.lower() or "decode" in error_str.lower():
+            return "We received an unexpected response from the service. Please try again."
+
+        if "memory" in error_str.lower() or "out of memory" in error_str.lower():
+            return "The request was too complex to process. Please simplify your question."
+
+        if "recursion" in error_str.lower() or "maximum recursion" in error_str.lower():
+            return "The request triggered an internal loop. Please rephrase your question."
+
+        if "overloaded" in error_str.lower() or "capacity" in error_str.lower():
+            return "Our service is currently overloaded. Please try again in a few minutes."
+
+        if "invalid_request" in error_str.lower() or "bad request" in error_str.lower():
+            return "Your request could not be understood. Please rephrase and try again."
+
+        return "An unexpected error occurred. Please try again later."
+        
     
 
 if __name__ == "__main__":

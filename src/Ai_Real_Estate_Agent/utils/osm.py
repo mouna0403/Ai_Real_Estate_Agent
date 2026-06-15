@@ -62,11 +62,7 @@ def _build_area_filter(insee_code: str) -> str:
 # 1. API OSM — ACTIVITÉS & COMMERCES
 # =========================
 
-def osm_location_tool(lat, lon, radius=1000, max_retries=3):
-    """
-    Récupère les activités, commerces et loisirs autour d'un point.
-    Retourne un dict {type: count}.
-    """
+def get_activities(lat, lon, radius=1000, max_retries=3):
     query = f"""
     [out:json][timeout:60];
     (
@@ -80,15 +76,22 @@ def osm_location_tool(lat, lon, radius=1000, max_retries=3):
     if not data or "elements" not in data:
         return {}
 
+    seen = set()
     stats = defaultdict(int)
+
     for el in data["elements"]:
         tags = el.get("tags", {})
-        if "amenity" in tags:
-            stats[tags["amenity"]] += 1
-        if "shop" in tags:
-            stats["shops"] += 1
-        if "leisure" in tags:
-            stats[tags["leisure"]] += 1
+        name = tags.get("name")
+        item_type = tags.get("amenity") or tags.get("shop") or tags.get("leisure")
+        if not item_type:
+            continue
+
+        key = (name, item_type)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        stats[item_type] += 1
 
     return dict(stats)
 
@@ -151,27 +154,26 @@ def get_commune_activities(insee_code):
 
     data = _post_overpass(query, timeout=90)
     if not data:
-        return {"insee": insee_code, "counts": {}, "items": []}
+        return {"insee": insee_code, "counts": {}}
 
+    seen = set()
     counts = defaultdict(int)
-    items = []
+
     for el in data.get("elements", []):
         tags = el.get("tags", {})
         activity_type = tags.get("amenity") or tags.get("shop") or tags.get("leisure") or tags.get("tourism")
-        if activity_type:
-            counts[activity_type] += 1
-        items.append({
-            "type": activity_type,
-            "name": tags.get("name"),
-            "lat": el.get("lat"),
-            "lon": el.get("lon"),
-        })
+        if not activity_type:
+            continue
 
-    return {
-        "insee": insee_code,
-        "counts": dict(counts),
-        "items": items[:10],
-    }
+        name = tags.get("name")
+        key = (name, activity_type)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        counts[activity_type] += 1
+
+    return {"insee": insee_code, "counts": dict(counts)}
 
 
 # =========================
@@ -354,7 +356,7 @@ def get_commune_transport(insee_code):
             "lat": lat,
             "lon": lon
         })
-        
+
     N_PER_TYPE = {"bus_stop": 3, "metro": 2, "tram": 2, "rail_station": 2}
     return {
     "insee_code": insee_code,
@@ -405,6 +407,7 @@ def get_commune_greenspaces(insee_code):
         "forest": 0, "grass": 0, "meadow": 0,
         "wood": 0, "scrub": 0, "heath": 0,
     }
+    seen = set()
     greenspaces = []
 
     for way in ways:
@@ -412,6 +415,12 @@ def get_commune_greenspaces(insee_code):
         gs_type = tags.get("leisure") or tags.get("landuse") or tags.get("natural")
         if gs_type not in counts:
             continue
+
+        name = tags.get("name")
+        key = (name, gs_type)
+        if key in seen:
+            continue
+        seen.add(key)
 
         counts[gs_type] += 1
 
@@ -423,14 +432,21 @@ def get_commune_greenspaces(insee_code):
             lat, lon = None, None
 
         greenspaces.append({
-            "name": tags.get("name"),
+            "name": name,
             "type": gs_type,
             "lat": lat,
             "lon": lon,
             "osm_id": way["id"],
         })
 
-    return {"insee_code": insee_code, "counts": counts, "greenspaces": greenspaces[:5]}
+    N_PER_TYPE = {"park": 2, "garden": 2, "nature_reserve": 1, "forest": 1, "grass": 1, "meadow": 1, "wood": 1, "scrub": 1, "heath": 1}
+
+    selected = sum(
+        ([s for s in greenspaces if s["type"] == t][:n] for t, n in N_PER_TYPE.items()),
+        []
+    )
+
+    return {"insee_code": insee_code, "counts": counts, "greenspaces": selected}
 
 
 # =========================
@@ -478,22 +494,39 @@ def get_green_spaces(lat, lon, radius=1000):
     if not data:
         return {"count": 0, "greens": []}
 
+    seen = set()
     greens = []
+
     for el in data.get("elements", []):
         tags = el.get("tags", {})
         lat_ = el.get("lat") or el.get("center", {}).get("lat")
         lon_ = el.get("lon") or el.get("center", {}).get("lon")
         if not lat_ or not lon_:
             continue
+
+        name = tags.get("name")
+        gs_type = tags.get("leisure") or tags.get("landuse") or tags.get("natural")
+
+        key = (name, gs_type)
+        if key in seen:
+            continue
+        seen.add(key)
+
         greens.append({
-            "name": tags.get("name"),
-            "type": tags.get("leisure") or tags.get("landuse") or tags.get("natural"),
+            "name": name,
+            "type": gs_type,
             "lat": lat_,
             "lon": lon_,
         })
 
-    return {"count": len(greens), "greens": greens[:5]}
+    N_PER_TYPE = {"park": 2, "garden": 2, "nature_reserve": 1, "grass": 1, "wood": 1}
 
+    selected = sum(
+        ([s for s in greens if s["type"] == t][:n] for t, n in N_PER_TYPE.items()),
+        []
+    )
+
+    return {"count": len(selected), "greens": selected}
 
 # =========================
 # 10. COMMUNE CENTROID
