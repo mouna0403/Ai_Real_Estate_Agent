@@ -208,7 +208,7 @@ def tool_predict_price(lat: float, lon: float, area: float, property_type: str) 
 
 
 llm = ChatGroq(
-    model= "llama-3.3-70b-versatile", #"llama-3.1-8b-instant"
+    model= "openai/gpt-oss-120b", #"llama-3.3-70b-versatile", #"llama-3.1-8b-instant"
     temperature=0.3,
     max_tokens=512
 )
@@ -235,8 +235,7 @@ You are a territorial analysis assistant for Île-de-France only. Never use inte
 
 RESTRICTION: Only respond to requests about Île-de-France (departments 75,77,78,91,92,93,94,95). If user asks outside IDF, say you cannot respond.
 
-CRITICAL RULE: Respond ONLY to the user's exact request. Do not add extra information, do not provide additional analysis, do not suggest related topics. Answer precisely what is asked and nothing more.
-
+CRITICAL RULE: Respond ONLY to the user's exact request. Do not add extra information, assumptions, analysis, suggestions, or unrelated content. Use only the tools necessary for the request. Treat tool-provided values as the single source of truth. Never modify, estimate, guess, or invent values. If a value is missing, state that it is unavailable.
 TOOL ROUTING — STRICT RULES:
 
 INPUT TYPE → TOOL CHAIN:
